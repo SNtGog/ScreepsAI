@@ -106,7 +106,7 @@ var RoomManager = CoreObject.extend({
             let neededHarvesters = HARV_SOURCE * this.sources.length;
             let numToBuild = neededHarvesters - harvestersCount;
 
-            if (harvestersCount < neededHarvesters < this.workers.length/2) {
+            if (!harvestersCount || harvestersCount < neededHarvesters) {
                 this.spawnCreeps('harvester', numToBuild);
             }
         }
@@ -147,7 +147,7 @@ var RoomManager = CoreObject.extend({
         };
         
         let energy = null;
-        if (role == 'harvester' && this.harvesters.length < HARV_SOURCE*0.6) {
+        if (role == 'harvester' && this.harvesters.length < HARV_SOURCE) {
             energy = this.room.energyCapacityAvailable;
         }
         
@@ -206,23 +206,23 @@ var RoomManager = CoreObject.extend({
             let tasks = _.filter(this.workerTasks, (t) => t.targetId === m);
             if (tasks.length < 1) {
                 let task = Memory.tasks[m];
-                for (let w in workers) {
-                    let worker = workers[w];
+                this.workers.forEach(function(worker) {
                     if(worker.memory.task && worker.memory.task.targetId === m) {
                         delete worker.memory['task'];
                     }
-                }
+                });
                 delete Memory.tasks[m];
             } 
         }
     },
     
     updateHarvesterTasks: function() {
-
+        var _this = this;
+        
         if (this.droppedResources.length) {
             this.droppedResources.forEach(function(res) {
-                harvesters.forEach(function(h) {
-                    if ((!h.memory.task || h.memory.task.action !== 'pickup') && _.sum(harvester.carry) === 0) {
+                this.harvesters.forEach(function(harvester) {
+                    if ((!harvester.memory.task || harvester.memory.task.action !== 'pickup') && _.sum(harvester.carry) === 0) {
                         harvester.memory.task = {
                             action: 'pickup',
                             targetId: res.id
@@ -232,18 +232,20 @@ var RoomManager = CoreObject.extend({
             });
         }
         
-        harvesters.forEach(function(h) {
+        this.harvesters.forEach(function(harvester) {
 
             if (!harvester.memory.task) {
-                this.sources.forEach(function(source) {
-                    let harvestersOnSource = _.sum(this.harvesters, (h) => h.memory.task && h.memory.task.targetId == source.id);
-                    if (harvestersOnSource < HARV_SOURCE) {
-                        harvester.mamory.task = {
-                            action: 'harvest',
-                            targetId: source.id
-                        }
-                    }
+                let sources = [];
+                _this.sources.forEach(function(source) {
+                    let harvestersOnSource = _.sum(_this.harvesters, (h) => harvester.memory.task && harvester.memory.task.targetId == source.id);
+                    sources.push({source: source, harvesters: harvestersOnSource});
                 });
+                
+                let obj = _.minBy(sources, 'harvesters');
+                harvester.memory.task = {
+                    action: 'harvest',
+                    targetId: obj.source.id
+                }
             }
         });
 
