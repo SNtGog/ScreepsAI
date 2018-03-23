@@ -47,6 +47,16 @@ Creep.prototype.getEnergy =
                 this.moveTo(source, {visualizePathStyle: {stroke: '#ffaa00'}});
             }
         }
+        
+        if (container == undefined) {
+            container = this.pos.findClosestByPath(FIND_MY_SPAWNS, (s) => s.energy > 0);
+            // try to withdraw energy, if the container is not in range
+            if (this.withdraw(container, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
+                // move towards it
+                this.moveTo(container, {visualizePathStyle: {stroke: '#ffaa00'}});
+            }
+        }
+        
     };
     
 Creep.prototype.putEnergy = function () {

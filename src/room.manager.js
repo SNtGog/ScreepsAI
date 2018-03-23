@@ -13,7 +13,7 @@ var roleWorker = require('role.worker');
 var _ = require('lodash');
 
 var HARV_SOURCE = 6;
-var BUILDERS = 12;
+var BUILDERS = 6;
 
 var MIN_MINERS = 1;
 var MIN_LORRY = 2;
@@ -30,19 +30,20 @@ var RoomManager = CoreObject.extend({
         });
         
         this.creeps = _.filter(Game.creeps, (c) => c.memory.home == room.name);
-        this.creepsCount = _.sum(this.creeps, (w) => w.memory.role == 'worker');
-        this.harvestersCount = _.sum(this.creeps, (w) => w.memory.role == 'harvester');
-        
+        this.workers = _.filter(this.creeps, (w) => w.memory.role == 'worker');
+        this.harvesters = _.filter(this.creeps, (w) => w.memory.role === 'harvester');
         this.sources = room.find(FIND_SOURCES);
-        this.sourcesCount = _.sum(this.sources, (s) => true);
-
+        this.droppedResources = room.find(FIND_DROPPED_RESOURCES)
+        
         this.workerTasks = {};
         
         this.searchWorkerTasks();
     },
     
     makeActions: function() {
+        this.cleanTasks();
         this.updateWorkerTasks();
+        this.updateHarvesterTasks();
         
         this.buildHarvestersIfNeeded();
     
@@ -86,7 +87,7 @@ var RoomManager = CoreObject.extend({
         
         for (let i in this.workerTasks) {
             let task = this.workerTasks[i];
-            neededWorkers += TASKS_PRIORITY[task.action];
+            neededWorkers = TASKS_PRIORITY[task.action] ? neededWorkers + TASKS_PRIORITY[task.action] : neededWorkers;
         }
         
         let workersToBuild = (neededWorkers > 10) ? 10 - workersCount : neededWorkers - workersCount;
@@ -101,33 +102,22 @@ var RoomManager = CoreObject.extend({
     buildHarvestersIfNeeded: function() {
         // if (this.room.energyCapacityAvailable < 600) {
         if (true) {
-            for(let key in this.sources) {
-                let source = this.sources[key];
-                let harvestersCount = this.harvestersCount;
-                let neededHarvesters = HARV_SOURCE;
-                let workersToBuild = neededHarvesters - harvestersCount;
+            let harvestersCount = this.harvesters.length;
+            let neededHarvesters = HARV_SOURCE * this.sources.length;
+            let numToBuild = neededHarvesters - harvestersCount;
 
-                if (harvestersCount < HARV_SOURCE) {
-                    let options = { 'task' : {
-                            action: 'harvest',
-                            targetId: source.id,
-                        }
-                    };
-                    
-                    this.spawnCreeps('harvester', workersToBuild, options);
-                }
+            if (harvestersCount < neededHarvesters < this.workers.length/2) {
+                this.spawnCreeps('harvester', numToBuild);
             }
         }
     },
-
     
-    getWorkerBody: function() {
-        var energy = this.room.energyCapacityAvailable;
-        
-        if (this.harvestersCount < 2) {
-            energy = this.room.energyAvailable;
-        }
+    getCustomBody: function(energy) {
 
+        if (!energy) {
+            energy = this.room.energyCapacityAvailable;
+        }
+        
         var partsCount = Math.floor(energy/200);
         var body = [];
         var parts = [WORK, CARRY, MOVE];
@@ -156,14 +146,23 @@ var RoomManager = CoreObject.extend({
             dryRun: true
         };
         
-        var body = this.getWorkerBody();
+        let energy = null;
+        if (role == 'harvester' && this.harvesters.length < HARV_SOURCE*0.6) {
+            energy = this.room.energyCapacityAvailable;
+        }
+        
+        if (role == 'worker' && this.workers.length < this.harvesters.length * 2) {
+            energy = this.room.energyCapacityAvailable;
+        }
+        
+        var body = this.getCustomBody(energy);
         var args = [body, name, options];
         
         let test = spawn.spawnCreep.apply(spawn, args);
        
-        if(test == 0) {
+        if(test === 0) {
             delete options.dryRun;
-            if (spawn.spawnCreep.apply(spawn, args) == 0) {
+            if (spawn.spawnCreep.apply(spawn, args) === 0) {
                 console.log('New creep ', name);
                 return true;
             }
@@ -202,41 +201,75 @@ var RoomManager = CoreObject.extend({
         this.addWorkerTask(this.getBuildTasks());
     },
     
-    updateWorkerTasks: function() {
-
-        let workers = _.filter(this.creeps, (w) => w.memory.role == 'worker');
-        
-        //remove tasks
+    cleanTasks: function() {
         for (let m in Memory.tasks) {
-            let tasks = _.filter(this.workerTasks, (t) => t.targetId == m);
+            let tasks = _.filter(this.workerTasks, (t) => t.targetId === m);
             if (tasks.length < 1) {
                 let task = Memory.tasks[m];
                 for (let w in workers) {
                     let worker = workers[w];
-                    if(worker.memory.task && worker.memory.task.targetId == m) {
+                    if(worker.memory.task && worker.memory.task.targetId === m) {
                         delete worker.memory['task'];
                     }
                 }
                 delete Memory.tasks[m];
             } 
         }
+    },
+    
+    updateHarvesterTasks: function() {
+
+        if (this.droppedResources.length) {
+            this.droppedResources.forEach(function(res) {
+                harvesters.forEach(function(h) {
+                    if ((!h.memory.task || h.memory.task.action !== 'pickup') && _.sum(harvester.carry) === 0) {
+                        harvester.memory.task = {
+                            action: 'pickup',
+                            targetId: res.id
+                        }
+                    }   
+                });
+            });
+        }
+        
+        harvesters.forEach(function(h) {
+
+            if (!harvester.memory.task) {
+                this.sources.forEach(function(source) {
+                    let harvestersOnSource = _.sum(this.harvesters, (h) => h.memory.task && h.memory.task.targetId == source.id);
+                    if (harvestersOnSource < HARV_SOURCE) {
+                        harvester.mamory.task = {
+                            action: 'harvest',
+                            targetId: source.id
+                        }
+                    }
+                });
+            }
+        });
+
+    },
+    
+    updateWorkerTasks: function() {
+        let workers = _.filter(this.creeps, (w) => w.memory.role === 'worker');
         
         workers = _.filter(workers, (w) => !w.memory.task);
         let count = _.sum(workers);
         
-        
         for (let w in workers) {
             for (let m in Memory.tasks) {
                 let task = Memory.tasks[m];
-                let needed = TASKS_PRIORITY[mem.action];
-                if (mem.creeps && mem.creeps.length >= needed) {
-                    for (let i in mem.creeps) {
-                        let creepName = mem.creeps[i];
+                let needed = TASKS_PRIORITY[task.action];
+                if (task.creeps && task.creeps.length < needed) {
+                    for (let i in task.creeps) {
+                        let creepName = task.creeps[i];
                         let creep = Game.creeps[creepName];
-                        
+                        count--;
                     }
                     continue;
                 }
+            }
+            if (count < 1) {
+                break;
             }
         }
         
