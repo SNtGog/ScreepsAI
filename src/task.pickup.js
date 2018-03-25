@@ -33,6 +33,16 @@ var pickup = function(creep, target) {
         } 
     }
     
+    if (target.store) {
+        for(const resourceType in creep.carry) {
+                if (creep.withdraw(target, resourceType) == ERR_NOT_IN_RANGE) {
+                    creep.move(target);
+                    return true;
+                }
+            }
+        return true;
+    }
+    
     if(creep.pickup(target) == ERR_NOT_IN_RANGE) {
         creep.moveTo(target);
         return true;

@@ -18,7 +18,7 @@ var BUILDERS = 6;
 
 var MIN_MINERS = 1;
 var MIN_LORRY = 2;
-var MIN_BUILDERS = 1;
+var MIN_WORKERS = 1;
 
 var WORKER_PER_TASK = {'repair': 1, 'build': 2, 'upgrade': 3};
 
@@ -35,6 +35,9 @@ var RoomManager = CoreObject.extend({
         this.harvesters = _.filter(this.creeps, (w) => w.memory.role === 'harvester');
         this.sources = room.find(FIND_SOURCES);
         this.droppedResources = room.find(FIND_DROPPED_RESOURCES)
+        this.tombstones = room.find(FIND_TOMBSTONES, {
+            filter: (t) => _.sum(t.carry) > 0 
+        });
         this.constructionSites = room.find(FIND_MY_CONSTRUCTION_SITES);
         this.hostiles = room.find(FIND_HOSTILE_CREEPS);
         this.towers = room.find(FIND_MY_STRUCTURES, {filter: {structureType: STRUCTURE_TOWER}});
@@ -183,7 +186,7 @@ var RoomManager = CoreObject.extend({
             energy = this.room.energyAvailable;
         }
         
-        if (role == 'worker' && this.workers.length < this.harvesters.length / 2) {
+        if (role == 'worker' && this.workers.length < MIN_WORKERS) {
             energy = this.room.energyAvailable;
         }
         
@@ -255,14 +258,37 @@ var RoomManager = CoreObject.extend({
         
         if (this.droppedResources.length) {
             this.droppedResources.forEach(function(res) {
-                _this.harvesters.forEach(function(harvester) {
+                for (let i in _this.harvesters) {
+                    let harvester = _this.harvesters[i];
+                    if (harvester.memory.task && harvester.memory.task.action === 'pickup') {
+                        break;
+                    }
+                    
                     if ((!harvester.memory.task || harvester.memory.task.action !== 'pickup') && _.sum(harvester.carry) === 0) {
                         harvester.memory.task = {
                             action: 'pickup',
                             targetId: res.id
                         }
                     }   
-                });
+                }
+            });
+        }
+        
+        if (this.tombstones.length) {
+            this.tombstones.forEach(function(res) {
+                for (let i in _this.harvesters) {
+                    let harvester = _this.harvesters[i];
+                    if (harvester.memory.task && harvester.memory.task.action === 'pickup') {
+                        break;
+                    }
+                    
+                    if ((!harvester.memory.task || harvester.memory.task.action !== 'pickup') && _.sum(harvester.carry) === 0) {
+                        harvester.memory.task = {
+                            action: 'pickup',
+                            targetId: res.id
+                        }
+                    }   
+                }
             });
         }
         
@@ -301,13 +327,18 @@ var RoomManager = CoreObject.extend({
             }
             
             let task = this.workerTasks[t];
-            Memory.tasks[task.targetId] = task;
-            Memory.tasks[task.targetId].creeps = [];
+            if (!Memory.tasks[task.targetId]) {
+                Memory.tasks[task.targetId] = task;
+                Memory.tasks[task.targetId].creeps = [];
+            }
         }
         
         for (let i = 0; i < workers.length; i++) {
             let worker = workers[i];
             for (let m in Memory.tasks) {
+                if (!worker) {
+                    continue;
+                }
                 let task = Memory.tasks[m];
                 let needed = WORKER_PER_TASK[task.action];
                 if (task.creeps && (task.creeps.length < needed) || task.action == 'upgrade') {

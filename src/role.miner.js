@@ -9,10 +9,10 @@
 
 var CoreRole = require('core.role');
 
-var RoleHarvester = CoreRole.extend({
+var RoleMiner = CoreRole.extend({
     tasks: {
-        'harvest': require('task.mine')
+        'mine': require('task.mine')
     }
 });
 
-module.exports = RoleHarvester;
+module.exports = RoleMiner;

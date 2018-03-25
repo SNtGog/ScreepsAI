@@ -8,7 +8,10 @@
  */
 
 var repair = function(creep, target) {
-    if (creep.repair(target) == ERR_NOT_IN_RANGE) {
+    if(creep.carry.energy === 0) {
+        creep.getEnergy();
+        return true;
+    } else if (creep.repair(target) == ERR_NOT_IN_RANGE) {
         creep.moveTo(target,  {visualizePathStyle: {stroke: '#ff8c1a'}})
         return true;
     }

@@ -16,6 +16,10 @@ var RoomArchitector = CoreObject.extend({
             this.buildContainers();
         }
         
+        if (1 < this.room.controller.level < 6) {
+            this.buildRoads();
+        }
+        
     },
     
     buildContainers: function() {
@@ -26,7 +30,7 @@ var RoomArchitector = CoreObject.extend({
                 filter: s => s.structureType == STRUCTURE_CONTAINER
             });
 
-            if (containers.length > 1) {
+            if (containers.length > 2) {
                 return;
             }
 
@@ -52,6 +56,32 @@ var RoomArchitector = CoreObject.extend({
                     return true;
                 }
             });
+        });
+    },
+    
+    buildRoads: function() {
+        let _this = this;
+        this.roomManager.sources.forEach(function(source) {
+            _this.buildRoadBetween(source, _this.room.controller);
+        });
+    },
+    
+    buildRoadBetween: function(src, dst) {
+        let _this = this;
+        let path = src.pos.findPathTo(dst, {
+            ignoreCreeps: true
+        });
+        if (!path) {
+            return;
+        }
+        
+        path.forEach(function(pos) {
+            let arr = _this.room.lookAt(pos.x, pos.y);
+            let structure = _.find(arr, 'structure');
+
+            if (!structure || !structure.structure) {
+                _this.room.createConstructionSite(x, y, STRUCTURE_ROAD);
+            }
         });
     },
     
