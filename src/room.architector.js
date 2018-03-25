@@ -102,7 +102,6 @@ var RoomArchitector = CoreObject.extend({
                 _this.room.createConstructionSite(pos.x, pos.y, STRUCTURE_ROAD);
                 count++;
             }
-        });
     },
     
     forPosAround: function(pos, range, func) {
