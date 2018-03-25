@@ -59,9 +59,13 @@ var empire = {
             for (let i in task.creeps) {
                 let creepName = task.creeps[i];
                 let creep = Game.creeps[creepName];
-                if (!creep) {
+                if (!creep || !creep.memory.task || (creep.memory.task.targetId != task.targetId)) {
                     task.creeps.splice(i,1);
                 }
+            }
+            
+            if (!task.creeps || !task.creeps.length) {
+                delete Memory.tasks[t];
             }
         }
     }

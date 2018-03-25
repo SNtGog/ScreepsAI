@@ -42,7 +42,7 @@ var RoomManager = CoreObject.extend({
         this.hostiles = room.find(FIND_HOSTILE_CREEPS);
         this.towers = room.find(FIND_MY_STRUCTURES, {filter: {structureType: STRUCTURE_TOWER}});
         
-        this.workerTasks = {};
+        this.workerTasks = [];
         
         this.searchWorkerTasks();
     },
@@ -54,7 +54,6 @@ var RoomManager = CoreObject.extend({
             this.repair();
         }
         
-        this.cleanTasks();
         this.updateWorkerTasks();
         this.updateHarvesterTasks();
         
@@ -65,8 +64,7 @@ var RoomManager = CoreObject.extend({
         
         this.buildWorkersIfNeeded();
         
-        let tasks = Object.keys(this.workerTasks);
-        if (tasks && tasks.length < 3) {
+        if (this.workerTasks < 3) {
             let architector = new RoomArchitector(this);
         }
     },
@@ -222,16 +220,17 @@ var RoomManager = CoreObject.extend({
     addWorkerTask: function(task) {
         if (_.isArray(task)) {
             for (let i in task) {
-                this.workerTasks[task[i].action+'_'+task[i].targetId] = task[i];
+                this.addWorkerTask(task[i]);
             }
+            return;
         }
-        if (_.isObject(task)) {
-            this.workerTasks[task.action+'_'+task.targetId] = task;
+        if (task && _.isObject(task)) {
+            this.workerTasks.push(task);
         }
     },
     
     searchWorkerTasks: function() {
-        this.addWorkerTask(this.getUpdateTask());
+        this.addWorkerTask(this.getUpgradeTask());
         if (!this.towers.length) {
             this.addWorkerTask(this.getRepairTasks());
         }
@@ -239,18 +238,7 @@ var RoomManager = CoreObject.extend({
     },
     
     cleanTasks: function() {
-        for (let m in Memory.tasks) {
-            let tasks = _.filter(this.workerTasks, (t) => t.targetId === m);
-            if (tasks.length < 1) {
-                let task = Memory.tasks[m];
-                this.workers.forEach(function(worker) {
-                    if(worker.memory.task && worker.memory.task.targetId === m) {
-                        delete worker.memory['task'];
-                    }
-                });
-                delete Memory.tasks[m];
-            } 
-        }
+        
     },
     
     updateHarvesterTasks: function() {
@@ -308,7 +296,7 @@ var RoomManager = CoreObject.extend({
                 harvester.memory.task = {
                     action: 'harvest',
                     targetId: source.id
-                }
+                };
             }
         });
 
@@ -316,32 +304,29 @@ var RoomManager = CoreObject.extend({
     
     updateWorkerTasks: function() {
         let _this = this;
-        let workers = _.filter(this.creeps, (w) => w.memory.role === 'worker');
+        let workers = _.filter(this.creeps, (w) => w.memory.role === 'worker' && 
+                (!w.memory.task || w.memory.task.action === 'upgrade'));
         
-        workers = _.filter(workers, (w) => !w.memory.task);
+        let workerTasks = this.workerTasks.sort((t1, t2) => t1.priority - t2.priority);
+        
         let count = workers.length;
         
-        for (let t in this.workerTasks) {
+        for (let i = 0; i < workers.length; i++) {
             if (count < 1) {
                 break;
             }
             
-            let task = this.workerTasks[t];
-            if (!Memory.tasks[task.targetId]) {
-                Memory.tasks[task.targetId] = task;
-                Memory.tasks[task.targetId].creeps = [];
-            }
-        }
-        
-        for (let i = 0; i < workers.length; i++) {
             let worker = workers[i];
-            for (let m in Memory.tasks) {
-                if (!worker) {
-                    continue;
+                       
+            for (let t in workerTasks) {
+                if (count < 1) {
+                    break;
                 }
-                let task = Memory.tasks[m];
+                let task = workerTasks[t];
+                let mem = Memory.tasks[task.targetId];
+                
                 let needed = WORKER_PER_TASK[task.action];
-                if (task.creeps && (task.creeps.length < needed) || task.action == 'upgrade') {
+                if (!mem || mem.creeps.length < needed) {
                     worker.setTask({
                         action: task.action,
                         targetId: task.targetId
@@ -349,17 +334,13 @@ var RoomManager = CoreObject.extend({
                     count--;
                     workers.splice(i,1);
                     i--;
-                } else {
-                    continue;
+                    break;
                 }
-            }
-            if (count < 1) {
-                break;
             }
         }
     },
     
-    getUpdateTask: function() {
+    getUpgradeTask: function() {
         var controller = this.room.controller;
         
         var task = {
@@ -416,17 +397,18 @@ var RoomManager = CoreObject.extend({
                 targetId: target.id,
                 priority: this.getStructurePriority(target.structureType)
             };
-            
+
             // if (target.structureType == STRUCTURE_WALL || target.structureType == STRUCTURE_RAMPART) {
             //     task.priority = 100;
             // }
             
-           tasks.push(task);
+            tasks.push(task);
+           
+            if (tasks.length > 5) {
+                break;
+            }
         }
-        
-        if (tasks.length > 6) {
-            tasks = tasks.slice(0,5);
-        }
+
         return tasks;
     },
     

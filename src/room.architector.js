@@ -64,6 +64,18 @@ var RoomArchitector = CoreObject.extend({
         this.roomManager.sources.forEach(function(source) {
             _this.buildRoadBetween(source, _this.room.controller);
         });
+        
+        this.roomManager.spawns.forEach(function(spawn) {
+            this.roomManager.sources.forEach(function(source) {
+                _this.buildRoadBetween(spawn, source);
+            });
+        });
+        
+//        let extensions = this.room.find(FIND_STRUCTURE, {
+//            filter: (s) => s.structureType === STRUCTURE_EXTENSION
+//        });
+//        
+//        let l
     },
     
     buildRoadBetween: function(src, dst) {
@@ -75,12 +87,20 @@ var RoomArchitector = CoreObject.extend({
             return;
         }
         
-        path.forEach(function(pos) {
+        let count = 0;
+        
+        for (let i in path) {
+            if (count > 4) {
+                break;
+            }
+            
+            let pos = path[i];
             let arr = _this.room.lookAt(pos.x, pos.y);
             let structure = _.find(arr, 'structure');
 
             if (!structure || !structure.structure) {
-                _this.room.createConstructionSite(x, y, STRUCTURE_ROAD);
+                _this.room.createConstructionSite(pos.x, pos.y, STRUCTURE_ROAD);
+                count++;
             }
         });
     },

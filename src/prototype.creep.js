@@ -96,9 +96,14 @@ Creep.prototype.setTask = function(task) {
     }
     
     this.memory.task = task;
-    Memory.tasks[task.targetId] = Memory.tasks[task.targetId] || task;
-    Memory.tasks[task.targetId].creeps = Memory.tasks[task.targetId].creeps;
-    Memory.tasks[task.targetId].creeps.push(this.name);
+    if (!Memory.tasks[task.targetId] && task) {
+        Memory.tasks[task.targetId] = task;
+        Memory.tasks[task.targetId].creeps = [];
+    }
+    
+    if (task && Memory.tasks[task.targetId].creeps.indexOf(this.name) < 0) {
+        Memory.tasks[task.targetId].creeps.push(this.name);
+    }
 };
 
 Creep.prototype.removeTask = function() {
@@ -109,7 +114,7 @@ Creep.prototype.removeTask = function() {
     let task = Memory.tasks[this.memory.task.targetId];
     if (task && task.creeps) {
         let index = task.creeps.indexOf(this.name);
-        if (index != -1) {
+        if (index < 0) {
             task.creeps.splice(index, 1);
         }
         if (!task.creeps.length) {
