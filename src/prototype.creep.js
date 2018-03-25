@@ -26,34 +26,30 @@ Creep.prototype.getEnergy =
                              s.store[RESOURCE_ENERGY] > 0
             });
             
-            // if one was found
         if (container != undefined) {
-            // try to withdraw energy, if the container is not in range
             if (this.withdraw(container, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
-                // move towards it
                 this.moveTo(container, {visualizePathStyle: {stroke: '#ffaa00'}});
             }
         }
  
-        // if no container was found and the Creep should look for Sources
         if (container == undefined && useSource) {
-            // find closest source
             var source = this.pos.findClosestByPath(FIND_SOURCES_ACTIVE);
             
-
-            // try to harvest energy, if the source is not in range
             if (this.harvest(source) == ERR_NOT_IN_RANGE) {
-                // move towards it
                 this.moveTo(source, {visualizePathStyle: {stroke: '#ffaa00'}});
             }
         }
         
         if (container == undefined) {
-            container = this.pos.findClosestByPath(FIND_MY_SPAWNS, (s) => s.energy > 0);
-            // try to withdraw energy, if the container is not in range
-            if (this.withdraw(container, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
-                // move towards it
-                this.moveTo(container, {visualizePathStyle: {stroke: '#ffaa00'}});
+            let containers = this.room.find(FIND_STRUCTURES, {
+                filter: s => s.structureType == STRUCTURE_CONTAINER
+            });
+            
+            if (!containers.length) {
+                container = this.pos.findClosestByPath(FIND_MY_SPAWNS, (s) => s.energy > 0);
+                if (this.withdraw(container, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
+                    this.moveTo(container, {visualizePathStyle: {stroke: '#ffaa00'}});
+                }
             }
         }
         
@@ -93,3 +89,32 @@ Creep.prototype.putEnergy = function () {
     }
 };
 
+Creep.prototype.setTask = function(task) {
+    if (!task.targetId) {
+        console.log('wrong task');
+        return;
+    }
+    
+    this.memory.task = task;
+    Memory.tasks[task.targetId] = Memory.tasks[task.targetId] || task;
+    Memory.tasks[task.targetId].creeps = Memory.tasks[task.targetId].creeps;
+    Memory.tasks[task.targetId].creeps.push(this.name);
+};
+
+Creep.prototype.removeTask = function() {
+    if (!this.memory.task || !this.memory.task.targetId) {
+        return;
+    }
+    
+    let task = Memory.tasks[this.memory.task.targetId];
+    if (task && task.creeps) {
+        let index = task.creeps.indexOf(this.name);
+        if (index != -1) {
+            task.creeps.splice(index, 1);
+        }
+        if (!task.creeps.length) {
+            delete Memory.tasks[task.targetId];
+        }
+    }
+    delete this.memory['task'];
+};

@@ -8,7 +8,10 @@
  */
 
 var upgrade = function(creep, target) {
-    if (creep.upgradeController(target) == ERR_NOT_IN_RANGE) {
+    if(creep.carry.energy === 0) {
+        creep.getEnergy();
+        return true;
+    } else if (creep.upgradeController(target) == ERR_NOT_IN_RANGE) {
         creep.moveTo(target,  {visualizePathStyle: {stroke: '#99ff66'}})
         return true;
     }

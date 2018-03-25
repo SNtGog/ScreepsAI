@@ -23,6 +23,8 @@ var CoreRole = CoreObject.extend({
                 this.beforeTask(task);
                 let result = this.doTask(task.action, target);
                 this.afterTask(task, result);
+            } else {
+                creep.removeTask();
             }
         }
     },
@@ -35,20 +37,18 @@ var CoreRole = CoreObject.extend({
         let task = this.tasks[action];
         
         if (task) {
-            task(this.creep, target);
+            let result = task(this.creep, target);
+            if (result == false) {
+                this.creep.removeTask();
+            }
+            return result;
         }
+        
     },
     
     afterTask: function(task, result) {
-        if (result === false) {
-            delete Memory.tasks[task.targetId];
-            this.creep.memory.task = null;
-        }
+
     },
 });
-
-// CoreRole.inst = function(creep) {
-//     return new CoreRole(creep);
-// };
 
 module.exports = CoreRole;

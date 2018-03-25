@@ -7,6 +7,12 @@
  * mod.thing == 'a thing'; // true
  */
 
-module.exports = {
+var CoreRole = require('core.role');
 
-};
+var RoleHarvester = CoreRole.extend({
+    tasks: {
+        'harvest': require('task.mine')
+    }
+});
+
+module.exports = RoleHarvester;
