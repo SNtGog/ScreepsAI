@@ -8,7 +8,7 @@
  */
 
 var CoreObject = require('core.object');
-var RoomArchitector = require('room.architector');
+
 var roleHarvester = require('role.harvester');
 var roleWorker = require('role.worker');
 var _ = require('lodash');
@@ -38,6 +38,9 @@ var RoomManager = CoreObject.extend({
         this.tombstones = room.find(FIND_TOMBSTONES, {
             filter: (t) => _.sum(t.carry) > 0 
         });
+        this.containers = this.room.find(FIND_STRUCTURES, {
+            filter: (s) => s.structureType === STRUCTURE_CONTAINER
+        });
         this.constructionSites = room.find(FIND_MY_CONSTRUCTION_SITES);
         this.hostiles = room.find(FIND_HOSTILE_CREEPS);
         this.towers = room.find(FIND_MY_STRUCTURES, {filter: {structureType: STRUCTURE_TOWER}});
@@ -63,10 +66,6 @@ var RoomManager = CoreObject.extend({
         // this.buildLorryIfNeeded();
         
         this.buildWorkersIfNeeded();
-        
-        if (this.workerTasks < 3) {
-            let architector = new RoomArchitector(this);
-        }
     },
     
     defend: function() {
@@ -99,13 +98,13 @@ var RoomManager = CoreObject.extend({
         }
     },
     
-    spawnCreeps: function(role, count, options) {
+    spawnCreeps: function(role, count, memory, energy) {
         let num = count;
         for(let i in this.spawns) {
             let spawn = this.spawns[i];
             
             if (num > 0) {
-                if (this.spawnWorker(spawn, role, options)) {
+                if (this.spawnWorker(spawn, role, memory, energy)) {
                     num--;
                 }
             } else {
@@ -124,6 +123,12 @@ var RoomManager = CoreObject.extend({
         }
         
         let workersToBuild = (neededWorkers > 10) ? 10 - workersCount : neededWorkers - workersCount;
+        
+        if (!this.containers.length) {
+            workersToBuild = 12 - workersCount;
+            this.spawnCreeps('worker', workersToBuild, null, this.room.energyAvailable);
+            return;
+        }
 
         if (workersToBuild < 1) {
             return;
@@ -133,16 +138,26 @@ var RoomManager = CoreObject.extend({
     },
     
     buildHarvestersIfNeeded: function() {
-        // if (this.room.energyCapacityAvailable < 600) {
-        if (true) {
+         if (this.room.energyCapacityAvailable < 600 || !this.containers.length) {
             let harvestersCount = this.harvesters.length;
             let neededHarvesters = HARV_SOURCE * this.sources.length;
             let numToBuild = neededHarvesters - harvestersCount;
+            
+            if (!this.containers.length) {
+                numToBuild = 4 - harvestersCount;
+                this.spawnCreeps('harvester', numToBuild, null, this.room.energyAvailable);
+                return;
+            }
 
             if (!harvestersCount || harvestersCount < neededHarvesters) {
                 this.spawnCreeps('harvester', numToBuild);
             }
         }
+    },
+    
+    getMaxBodySize: function() {
+        let energy = this.room.energyCapacityAvailable;
+        return Math.floor(energy/200);
     },
     
     getCustomBody: function(energy) {
@@ -166,7 +181,7 @@ var RoomManager = CoreObject.extend({
         return body;
     },
     
-    spawnWorker: function(spawn, role, memory) {
+    spawnWorker: function(spawn, role, memory, energy) {
         var name = this.getName(role + '_');
         var _memory = {role: role, home: this.room.name};
         
@@ -179,7 +194,6 @@ var RoomManager = CoreObject.extend({
             dryRun: true
         };
         
-        let energy = null;
         if (role == 'harvester' && this.harvesters.length < HARV_SOURCE) {
             energy = this.room.energyAvailable;
         }
@@ -252,7 +266,7 @@ var RoomManager = CoreObject.extend({
                         break;
                     }
                     
-                    if ((!harvester.memory.task || harvester.memory.task.action !== 'pickup') && _.sum(harvester.carry) === 0) {
+                    if (_.sum(harvester.carry) < harvester.carryCapacity) {
                         harvester.memory.task = {
                             action: 'pickup',
                             targetId: res.id
@@ -270,7 +284,7 @@ var RoomManager = CoreObject.extend({
                         break;
                     }
                     
-                    if ((!harvester.memory.task || harvester.memory.task.action !== 'pickup') && _.sum(harvester.carry) === 0) {
+                    if (_.sum(harvester.carry) < harvester.carryCapacity) {
                         harvester.memory.task = {
                             action: 'pickup',
                             targetId: res.id
@@ -280,7 +294,10 @@ var RoomManager = CoreObject.extend({
             });
         }
         
-        this.harvesters.forEach(function(harvester) {
+        this.workers.forEach(function(harvester) {
+            if (_this.containers.length) {
+                return;
+            }
 
             if (!harvester.memory.task) {
                 
@@ -304,8 +321,7 @@ var RoomManager = CoreObject.extend({
     
     updateWorkerTasks: function() {
         let _this = this;
-        let workers = _.filter(this.creeps, (w) => w.memory.role === 'worker' && 
-                (!w.memory.task || w.memory.task.action === 'upgrade'));
+        let workers = _.filter(this.creeps, (w) => w.memory.role === 'worker');
         
         let workerTasks = this.workerTasks.sort((t1, t2) => t1.priority - t2.priority);
         
@@ -317,6 +333,23 @@ var RoomManager = CoreObject.extend({
             }
             
             let worker = workers[i];
+            
+            if (this.containers.length && (!worker.memory.task || worker.memory.task.action === 'upgrade')) {
+                continue;
+            } 
+            
+            if (!this.containers.length) {
+                if (worker.carry.energy == worker.carryCapacity && worker.memory.action == 'harvest') {
+                    worker.removeTask();
+                }
+                
+                if (worker.carry.energy == 0) {
+                    worker.removeTask();
+                    continue;
+                }
+            }
+            
+            
                        
             for (let t in workerTasks) {
                 if (count < 1) {
@@ -326,7 +359,7 @@ var RoomManager = CoreObject.extend({
                 let mem = Memory.tasks[task.targetId];
                 
                 let needed = WORKER_PER_TASK[task.action];
-                if (!mem || mem.creeps.length < needed) {
+                if (!mem || (mem.creeps.length < needed || task.action === 'upgrade')) {
                     worker.setTask({
                         action: task.action,
                         targetId: task.targetId

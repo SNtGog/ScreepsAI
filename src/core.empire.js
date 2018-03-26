@@ -9,15 +9,17 @@
 
  
 var RoomManager = require('room.manager');
+var RoomArchitector = require('room.architector');
 
 Memory.tasks = Memory.tasks || {};
+Memory.timers = Memory.timers || {};
 
 var empire = {
     run: function() {
         Game.cache = {
             roomManagers: {}
         };
-        
+
         this.cleanMemory();
         
         
@@ -28,13 +30,23 @@ var empire = {
             // }
             if (room.controller.my) {
                 let manager = new RoomManager(room);
-                Game.cache[room.id] = manager;
+                Game.cache.roomManagers[room.id] = manager;
                 manager.makeActions();
+                
+                Memory.timers['architect'] = Memory.timers['architect'] || Game.time;
+                let archTime = Memory.timers['architect'];
+                if (manager && archTime + 10 < Game.time) {
+                    let architector = new RoomArchitector(manager);
+                }
             }
         }
         
         for (let creepName in Game.creeps) {
             Game.creeps[creepName].runRole();
+        }
+        
+        if (Memory.timers['architect'] + 10 < Game.time) {
+            Memory.timers['architect'] = Game.time;
         }
     },
     

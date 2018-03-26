@@ -8,7 +8,7 @@
  */
  
 var harvest = function(creep, target) {
-    if (creep.carry.energy == creep.carryCapacity) {
+    if (creep.carry.energy == creep.carryCapacity || (creep.carry.energy != 0 && !creep.pos.isNearTo(target))) {
         creep.putEnergy();
         return true;
     } else {

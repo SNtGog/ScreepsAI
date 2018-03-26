@@ -11,6 +11,7 @@ var CoreRole = require('core.role');
 
 var RoleWorker = CoreRole.extend({
     tasks: {
+        'harvest': require('task.harvest'),
         'repair': require('task.repair'),
         'build': require('task.build'),
         'upgrade': require('task.upgrade')

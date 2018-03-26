@@ -11,7 +11,7 @@ var CoreRole = require('core.role');
 
 var RoleHarvester = CoreRole.extend({
     tasks: {
-        'harvest': require('task.harvest'),
+        'lorry': require('task.lorry'),
         'pickup': require('task.pickup')
     }
 });
