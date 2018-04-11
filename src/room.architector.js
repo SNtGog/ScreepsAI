@@ -26,8 +26,25 @@ var RoomArchitector = CoreObject.extend({
         
         if (this.room.controller.level > 3) {
             this.buildStorage();
+            this.buildExtensions();
         }
         
+    },
+    
+    buildExtensions: function() {
+        if (!this.room.storage) {
+          return;
+        }  
+        let pos = this.room.storage.pos;
+        let _this = this;
+        
+        this.forPosAround(pos, 8 , 2, function(x,y) {
+            // _this.room.visual.circle(x,y, {fill: 'transparent', radius: 0.55, stroke: 'red'});
+            if(_this.room.createConstructionSite(x, y, STRUCTURE_EXTENSION) === 0) {
+                _this.room.visual.circle(x,y, {fill: 'transparent', radius: 0.55, stroke: 'red'});
+                return true;
+            }
+        }, true);
     },
     
     buildStorage: function() {
@@ -40,7 +57,7 @@ var RoomArchitector = CoreObject.extend({
         this.forPosAround({
             x: ROOM_WIDTH/2,
             y: ROOM_HEIGHT/2
-        }, 20, function(x,y) {
+        }, 20, 1, function(x,y) {
             let arr = _this.room.lookAt(x,y);
             let terrain = _.find(arr, 'terrain');
             if (!terrain || terrain.terrain === 'wall') {
@@ -48,11 +65,16 @@ var RoomArchitector = CoreObject.extend({
             }
 
             let structure = _.find(arr, 'structure');
-
-            if (!structure) {
-                _this.room.createConstructionSite(x, y, STRUCTURE_STORAGE);
+            
+            if(_this.room.createConstructionSite(x, y, STRUCTURE_STORAGE) === 0) {
+                _this.room.visual.circle(x,y, {fill: 'transparent', radius: 0.55, stroke: 'red'});
                 return true;
             }
+
+//            if (!structure) {
+//                _this.room.createConstructionSite(x, y, STRUCTURE_STORAGE);
+//                return true;
+//            }
         });
   },
     
@@ -76,7 +98,7 @@ var RoomArchitector = CoreObject.extend({
                 return;
             }
             
-            _this.forPosAround(source.pos, 1 , function(x,y) {
+            _this.forPosAround(source.pos, 1, 1, function(x,y) {
                 let arr = _this.room.lookAt(x,y);
                 let terrain = _.find(arr, 'terrain');
                 if (terrain && terrain.terrain === 'wall') {
@@ -84,10 +106,12 @@ var RoomArchitector = CoreObject.extend({
                 }
                 
                 let structure = _.find(arr, 'structure');
-                console.log(structure.structure.structureType);
+
                 if (!structure || structure.structure.structureType != STRUCTURE_CONTAINER) {
-                    _this.room.createConstructionSite(x, y, STRUCTURE_CONTAINER);
-                    return true;
+                    if(_this.room.createConstructionSite(x, y, STRUCTURE_CONTAINER) === 0) {
+                        _this.room.visual.circle(x,y, {fill: 'transparent', radius: 0.55, stroke: 'red'});
+                        return true;
+                    }
                 }
             });
         });
@@ -104,18 +128,20 @@ var RoomArchitector = CoreObject.extend({
                 _this.buildRoadBetween(spawn, source);
             });
             
-            _this.forPosAround(spawn.pos, 1 , function(x,y) {
+            _this.forPosAround(spawn.pos, 1, 1, function(x,y) {
                 let arr = _this.room.lookAt(x,y);
                 let terrain = _.find(arr, 'terrain');
                 if (terrain && terrain.terrain === 'wall') {
-                    return false;
+                    return;
                 }
                 
                 let structure = _.find(arr, 'structure');
-                
+               
                 if (!structure) {
-                    _this.room.createConstructionSite(x, y, STRUCTURE_ROAD);
-                    return true;
+                    if(_this.room.createConstructionSite(x, y, STRUCTURE_ROAD) === 0) {
+                        _this.room.visual.circle(x,y, {fill: 'transparent', radius: 0.55, stroke: 'red'});
+                        return true;
+                    }
                 }
             });
         });
@@ -131,7 +157,7 @@ var RoomArchitector = CoreObject.extend({
                 _this.buildRoadBetween(_this.room.storage, spawn);
             });
             
-            _this.forPosAround(this.room.storage.pos, 1 , function(x,y) {
+            _this.forPosAround(this.room.storage.pos, 1, 1, function(x,y) {
                 let arr = _this.room.lookAt(x,y);
                 let terrain = _.find(arr, 'terrain');
                 if (terrain && terrain.terrain === 'wall') {
@@ -141,8 +167,10 @@ var RoomArchitector = CoreObject.extend({
                 let structure = _.find(arr, 'structure');
                 
                 if (!structure) {
-                    _this.room.createConstructionSite(x, y, STRUCTURE_ROAD);
-                    return true;
+                    if(_this.room.createConstructionSite(x, y, STRUCTURE_ROAD) === 0) {
+                        _this.room.visual.circle(x,y, {fill: 'transparent', radius: 0.55, stroke: 'red'});
+                        return true;
+                    }
                 }
             });
         }
@@ -187,19 +215,34 @@ var RoomArchitector = CoreObject.extend({
             let arr = _this.room.lookAt(pos.x, pos.y);
             let structure = _.find(arr, 'structure');
 
-            if (!structure || !structure.structure) {
-                _this.room.createConstructionSite(pos.x, pos.y, STRUCTURE_ROAD);
+            if((!structure || !structure.structure) && _this.room.createConstructionSite(pos.x, pos.y, STRUCTURE_ROAD) === 0) {
+                _this.room.visual.circle(pos.x,pos.y, {fill: 'transparent', radius: 0.55, stroke: 'red'});
                 count++;
             }
+
+            // if (!structure || !structure.structure) {
+            //     _this.room.createConstructionSite(pos.x, pos.y, STRUCTURE_ROAD);
+            //     count++;
+            // }
         }
     },
     
-    forPosAround: function(pos, range, func) {
+    forPosAround: function(pos, range, step, func, emptyCenter) {
+        step = step || 1;
         for (let r = 1; r <= range; r++) {
-            for(let y = pos.y - r; y <= pos.y + r; y += r) {
-                for (let x = pos.x - r; x <= pos.x + r; x += r) {
+            for(let y = pos.y - r; y <= pos.y + r; y += step) {
+                for (let x = pos.x - r; x <= pos.x + r; x += step) {
+                    
+                    if (emptyCenter) {
+                        if (x > pos.x - step && x < pos.x + step) {
+                            if (y > pos.y - step && y < pos.y + step) {
+                                continue;
+                            }
+                        }
+                    }
+                    
                     let result = func(x,y);
-                    // this.room.visual.circle(x, y, {fill: 'transparent', radius: 1, stroke: 'red'});
+                    // this.room.visual.circle(Math.floor(x), Math.floor(y), {fill: 'transparent', radius: 0.5, stroke: 'blue'});
                     
                     if (result == true) {
                         return;

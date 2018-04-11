@@ -10,6 +10,7 @@
  
 var RoomManager = require('room.manager');
 var RoomArchitector = require('room.architector');
+var utils = require('utils');
 
 Memory.tasks = Memory.tasks || {};
 Memory.timers = Memory.timers || {};
@@ -22,12 +23,9 @@ var empire = {
 
         this.cleanMemory();
         
-        
         for (let roomName in Game.rooms) {
             let room = Game.rooms[roomName];
-            // for (let creep in Game.creeps) {
-            //     Game.creeps[creep].memory.home = room.name;
-            // }
+                        
             if (room.controller.my) {
                 let manager = new RoomManager(room);
                 Game.cache.roomManagers[room.id] = manager;

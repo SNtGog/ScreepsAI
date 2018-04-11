@@ -2,3 +2,6 @@
 !src
 !src/*
 !.gitignore
+!Gruntfile.js
+!package.json
+!dist

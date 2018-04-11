@@ -6,5 +6,5 @@ module.exports.loop = function () {
         console.log('Skipping tick ' + Game.time + ' due to lack of CPU.');
         return;
     }
-    empire.run();
+    empire.run(); 
 }

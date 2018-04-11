@@ -12,8 +12,14 @@ var harvest = function(creep, target) {
         creep.putEnergy();
         return true;
     } else {
-        if(creep.harvest(target) == ERR_NOT_IN_RANGE) {
-            creep.moveTo(target, {visualizePathStyle: {stroke: '#ffaa00'}});
+        let result = creep.harvest(target);
+        if(result == ERR_NOT_IN_RANGE) {
+            if (creep.moveTo(target, {visualizePathStyle: {stroke: '#ffaa00'}}) === -2) {
+                return false;
+            }
+        } 
+        if (result == ERR_NOT_ENOUGH_ENERGY) {
+            return false;
         }
         return true;
     }

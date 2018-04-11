@@ -1,9 +1,11 @@
+var utils = require('utils');
+
 var roles = {
     harvester: require('role.harvester'),
     worker: require('role.worker'),
     // claimer: require('role.claimer'),
-    // miner: require('role.miner'),
-    // lorry: require('role.lorry')
+     miner: require('role.miner'),
+     lorry: require('role.lorry')
 };
 
 Creep.prototype.runRole =
@@ -22,13 +24,17 @@ Creep.prototype.getEnergy =
 
         /** @type {StructureContainer} */
         let container = this.pos.findClosestByPath(FIND_STRUCTURES, {
-                filter: s => (s.structureType == STRUCTURE_CONTAINER || s.structureType == STRUCTURE_STORAGE) &&
-                             s.store[RESOURCE_ENERGY] > 0
+                filter: s => s.structureType == STRUCTURE_CONTAINER && s.store[RESOURCE_ENERGY] >= this.energyCapacity
             });
+            
+        if (container == undefined) {
+            container = this.room.storage;
+        }    
             
         if (container != undefined) {
             if (this.withdraw(container, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
                 this.moveTo(container, {visualizePathStyle: {stroke: '#ffaa00'}});
+                return;
             }
         }
  
@@ -55,20 +61,26 @@ Creep.prototype.getEnergy =
         
     };
     
-Creep.prototype.putEnergy = function () {
+Creep.prototype.putEnergy = function(structure) {
     var creep = this;
-    
-    var structure = creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
-            // the second argument for findClosestByPath is an object which takes
-            // a property called filter which can be a function
-            // we use the arrow operator to define it
-            filter: (s) => (s.structureType == STRUCTURE_SPAWN
-                         || s.structureType == STRUCTURE_EXTENSION
-                         || s.structureType == STRUCTURE_TOWER)
-                         && s.energy < s.energyCapacity 
-        
-    });
 
+    if (structure == undefined && creep.memory.energyContainer) {
+        structure = Game.getObjectById(creep.memory.energyContainer);
+    }
+
+    if (structure == undefined) {
+        structure = creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
+                // the second argument for findClosestByPath is an object which takes
+                // a property called filter which can be a function
+                // we use the arrow operator to define it
+                filter: (s) => (s.structureType == STRUCTURE_SPAWN
+                             || s.structureType == STRUCTURE_EXTENSION
+                             || s.structureType == STRUCTURE_TOWER)
+                             && s.energy < s.energyCapacity 
+            
+        });
+    }
+    
     if (structure == undefined) {
         structure = creep.room.storage;
     }
@@ -82,11 +94,24 @@ Creep.prototype.putEnergy = function () {
     // if we found one
     if (structure != undefined) {
         // try to transfer energy, if it is not in range
-        if (creep.transfer(structure, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
+        let code = creep.transfer(structure, RESOURCE_ENERGY);
+        if (code == ERR_NOT_IN_RANGE) {
             // move towards it
-            creep.moveTo(structure, {visualizePathStyle: {stroke: '#ffaa00'}});
+            if (creep.moveTo(structure, {visualizePathStyle: {stroke: '#ffaa00'}}) === ERR_NO_PATH) {
+                return false;
+            } else {
+                creep.memory.energyContainer = structure.id;
+            }
         }
+        if (code === -8) {
+            delete creep.memory['energyContainer'];
+        }
+    } else {
+        delete creep.memory['energyContainer'];
+        return false;
     }
+    
+    return structure;
 };
 
 Creep.prototype.setTask = function(task) {
@@ -123,3 +148,14 @@ Creep.prototype.removeTask = function() {
     }
     delete this.memory['task'];
 };
+
+var _harvest = Creep.prototype.harvest;
+Creep.prototype.harvest = function() {
+    let _this = this;
+    let result = _harvest.apply(this, arguments);
+    if (result === OK) {
+        this.room.memory.energyHarvested += this.getActiveBodyparts(WORK) * 2;
+    }
+
+    return result;
+}

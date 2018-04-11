@@ -13,10 +13,11 @@ var mine = function(creep, target) {
     })[0];
 
     if (creep.pos.isEqualTo(container.pos)) {
-        creep.harvest(source);
+        creep.harvest(target);
     } else {
         creep.moveTo(container);
     }
+    return true;
 }
 
 module.exports = mine;

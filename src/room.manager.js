@@ -8,23 +8,26 @@
  */
 
 var CoreObject = require('core.object');
-
+var utils = require('utils');
 var roleHarvester = require('role.harvester');
 var roleWorker = require('role.worker');
 var _ = require('lodash');
 
-var HARV_SOURCE = 6;
+var HARV_SOURCE = 8;
 var BUILDERS = 6;
 
 var MIN_MINERS = 1;
 var MIN_LORRY = 2;
 var MIN_WORKERS = 1;
 
-var WORKER_PER_TASK = {'repair': 1, 'build': 2, 'upgrade': 3};
+var WORKER_PER_TASK = {'harvest': 0 , 'repair': 1, 'build': 4, 'upgrade': 9000};
+var BUILD_WORKERS_PER_TASK = {'harvest': 0 , 'repair': 1, 'build': 2, 'upgrade': 3};
 
 var RoomManager = CoreObject.extend({
     
     initialize: function(room) {
+        let _this = this;
+        
         this.room = room;
         this.spawns = room.find(FIND_STRUCTURES, {
             filter: (i) => i.structureType == STRUCTURE_SPAWN
@@ -33,6 +36,9 @@ var RoomManager = CoreObject.extend({
         this.creeps = _.filter(Game.creeps, (c) => c.memory.home == room.name);
         this.workers = _.filter(this.creeps, (w) => w.memory.role == 'worker');
         this.harvesters = _.filter(this.creeps, (w) => w.memory.role === 'harvester');
+        this.miners = _.filter(this.creeps, (w) => w.memory.role === 'miner');
+        this.lorry = _.filter(this.creeps, (w) => w.memory.role === 'lorry');
+        
         this.sources = room.find(FIND_SOURCES);
         this.droppedResources = room.find(FIND_DROPPED_RESOURCES)
         this.tombstones = room.find(FIND_TOMBSTONES, {
@@ -45,46 +51,85 @@ var RoomManager = CoreObject.extend({
         this.hostiles = room.find(FIND_HOSTILE_CREEPS);
         this.towers = room.find(FIND_MY_STRUCTURES, {filter: {structureType: STRUCTURE_TOWER}});
         
-        this.workerTasks = [];
+        this.shouldWorkersUseSource = this.containers.length < 2 && (!!this.harvesters.length || (!!this.miners.length  && !!this.lorry.length));
         
+        this.workerTasks = [];
+        this.spawnQueue = [];
+        this.neighbourRooms = Game.map.describeExits(this.room.name);
+        
+        if (this.room.memory.harvestersCount == null) {
+            this.room.memory.harvestersCount = this.harvesters.length;
+        }
+
+        utils.setInterval(this.room.name + '_energy', 300, function() {
+            let sources = _this.room.find(FIND_SOURCES);
+            _this.room.memory.maxEnergyIncome = 0;
+            sources.forEach((s) => _this.room.memory.maxEnergyIncome += s.energyCapacity);
+            let count = _this.room.memory.harvestersCount;
+
+            if (_this.room.memory.energyHarvested < _this.room.memory.maxEnergyIncome) {
+                count = count > 11 ? count : count + 1;
+                _this.room.memory.needHarvesters = true;
+                console.log('++');
+            }  else {
+                let delta = _this.room.memory.noEnergyTime - Game.time - 330;
+                if (delta > 0) {
+                    count = Math.max(Math.floor(count/300*delta), 2);
+                }
+                _this.room.memory.needHarvesters = false;    
+                console.log(count, _this.room.memory.energyHarvested, count < 2 ? count : count - 1, delta);
+            }
+            
+            _this.room.memory.energyHarvested = 0;
+        });
+
         this.searchWorkerTasks();
+
     },
     
     makeActions: function() {
         if (this.hostiles && this.hostiles.length > 0) {
             this.defend();
-        } else {
+        } else if (_.filter(this.creeps, (c) => c.hits < c.hitsMax).length)
+            this.heal();
+        else {
             this.repair();
         }
         
         this.updateWorkerTasks();
         this.updateHarvesterTasks();
+        this.updateLorryTasks();
+        
+        this.buildMinersIfNeeded();
+        this.buildLorryIfNeeded();
         
         this.buildHarvestersIfNeeded();
-    
-        // this.buildMinersIfNeeded();
-        // this.buildLorryIfNeeded();
-        
+        this.buildLongDistanceHarvestersIfNeeded();
         this.buildWorkersIfNeeded();
+        
+        this.spawnCreeps();
     },
     
     defend: function() {
         let _this = this;
         
-        var username = hostiles[0].owner.username;
-        Game.notify(`User ${username} spotted in room ${room.name}`);
+        var username = this.hostiles[0].owner.username;
+        Game.notify(`User ${username} spotted in room ${this.room.name}`);
 
         this.towers.forEach(function(tower) {
             let hostile = tower.pos.findClosestByRange(_this.hostiles);    
             tower.attack(hostile);
         });
 
-        this.room.controller.activateSafeMode(); //TODO
+        if (!this.towers.length) {
+            this.room.controller.activateSafeMode(); //TODO
+        }
     },
     
     repair: function() {
         const targets = this.room.find(FIND_STRUCTURES, {
-            filter: object => object.hits < object.hitsMax - 200
+            filter: object => object.hits < object.hitsMax/2 
+                    && [STRUCTURE_WALL,STRUCTURE_RAMPART].indexOf(object.structureType) === -1
         });
         
         targets.sort((a,b) => a.hits - b.hits);
@@ -98,35 +143,66 @@ var RoomManager = CoreObject.extend({
         }
     },
     
-    spawnCreeps: function(role, count, memory, energy) {
-        let num = count;
+    heal: function() {
+        const targets = _.filter(this.creeps, (c) => c.hits < c.hitsMax);  
+        targets.sort((a,b) => a.hits - b.hits);
+        
+        if (targets.length) {
+            this.towers.forEach(function(tower) {   
+                if (tower.energy > tower.energyCapacity/2) {
+                    tower.heal(targets.shift());
+                }
+            });
+        }
+    },
+    
+    addToSpawQueue: function(opt, num) {
+        num = num || 1;
+        for (let i = 0; i < num; i++) {
+            this.spawnQueue.push(opt);
+        }
+    },
+    
+    spawnCreeps: function() {
+        this.spawnQueue = this.spawnQueue.sort((a,b) => a.priority - b.priority);
         for(let i in this.spawns) {
             let spawn = this.spawns[i];
-            
-            if (num > 0) {
-                if (this.spawnWorker(spawn, role, memory, energy)) {
-                    num--;
-                }
-            } else {
-                break;
-            }
+            let options = this.spawnQueue[i];
+            if (options) {
+                this.spawnCreep(spawn, options);
+            } 
         }  
     },
     
     buildWorkersIfNeeded: function() {
         let neededWorkers = 0;
-        let workersCount = _.sum(this.workers, (w) => w.memory.role == 'worker');
+        let workersCount = this.workers.length;
+        let options = {
+            memory: {
+                role: 'worker'
+            },
+            energy: null,
+            priority: 10
+        };
         
         for (let i in this.workerTasks) {
             let task = this.workerTasks[i];
-            neededWorkers = WORKER_PER_TASK[task.action] ? neededWorkers + WORKER_PER_TASK[task.action] : neededWorkers;
+            neededWorkers = BUILD_WORKERS_PER_TASK[task.action] ? neededWorkers + BUILD_WORKERS_PER_TASK[task.action] : neededWorkers;
         }
         
-        let workersToBuild = (neededWorkers > 10) ? 10 - workersCount : neededWorkers - workersCount;
+        if (neededWorkers) {
+            neededWorkers = Math.max(Math.floor(neededWorkers/(this.getMaxBodySize()/4)), 4);
+        }
         
-        if (!this.containers.length) {
-            workersToBuild = 12 - workersCount;
-            this.spawnCreeps('worker', workersToBuild, null, this.room.energyAvailable);
+        let workersToBuild = (neededWorkers > 8) ? 8 - workersCount : neededWorkers - workersCount;
+        
+        if (this.workers.length < neededWorkers - 2) {
+            options.energy = this.room.energyAvailable;
+        }
+        
+        if (this.shouldWorkersUseSource) {
+            options.energy = this.room.energyAvailable;
+            this.addToSpawQueue(options, 8 - workersCount);
             return;
         }
 
@@ -134,30 +210,115 @@ var RoomManager = CoreObject.extend({
             return;
         }
         
-        this.spawnCreeps('worker', workersToBuild);
+        this.addToSpawQueue(options, workersToBuild);
     },
     
     buildHarvestersIfNeeded: function() {
-         if (this.room.energyCapacityAvailable < 600 || !this.containers.length) {
+         if (this.room.energyCapacityAvailable < 600 || !this.containers.length || (!this.miners.length && !this.lorry.length)) {
             let harvestersCount = this.harvesters.length;
-            let neededHarvesters = HARV_SOURCE * this.sources.length;
-            let numToBuild = neededHarvesters - harvestersCount;
+            let options = {
+                memory: {
+                    role: 'harvester',
+                },
+                energy: null,
+                priority: 6
+            };
             
-            if (!this.containers.length) {
-                numToBuild = 4 - harvestersCount;
-                this.spawnCreeps('harvester', numToBuild, null, this.room.energyAvailable);
-                return;
+            if (this.harvesters.length < this.room.memory.harvestersCount - 3) {
+                options.energy = this.room.energyAvailable;
             }
 
-            if (!harvestersCount || harvestersCount < neededHarvesters) {
-                this.spawnCreeps('harvester', numToBuild);
+            if (this.room.memory.harvestersCount > this.harvesters.length) {
+                this.addToSpawQueue(options, 1);
             }
+        }
+    },
+    
+    buildLongDistanceHarvestersIfNeeded: function() {
+        if (!this.containers.length && !this.room.storage) {
+            return;
+        }  
+        
+        for (let i in this.neighbourRooms) {
+            let name = this.neighbourRooms[i];
+            let room = Game.rooms[name];
+            // console.log(name);
+            if (!room) {
+                continue;
+            }
+            console.log(room.controller.owner);
+            if (room.controller.owner) {
+                continue;
+            } 
+        }
+        
+    },
+    
+    buildMinersIfNeeded: function() {
+        let _this = this;
+        let minersCount = this.miners.length;
+        let neededMiners = MIN_MINERS * this.sources.length;   
+        let options = {
+            memory: {
+                role: 'miner',
+            },
+            energy: null,
+            priority: 4
+        };
+        
+        if (minersCount < neededMiners) {
+            
+            let sources = [];
+            this.sources.forEach(function(source) {
+                let minersOnSource = _.filter(_this.miners, (m) => m.memory.task && m.memory.task.targetId == source.id).length;
+                sources.push({source: source, miners: minersOnSource});
+            });
+
+            sources = sources.sort((s1,s2) => s1.miners - s2.miners);
+            let source = _.first(sources).source;
+            
+            options.memory.task = {
+                action: 'mine',
+                targetId: source.id
+            };
+            
+            options.body = [WORK, WORK, WORK, WORK, WORK, MOVE,MOVE];
+          
+            this.addToSpawQueue(options, neededMiners - minersCount);
+        }
+    },
+    
+    buildLorryIfNeeded: function() {
+        let lorryCount = this.lorry.length;
+        let neededLorry = MIN_LORRY * this.sources.length;   
+        let options = {
+            memory: {
+                role: 'lorry',
+            },
+            energy: null,
+            priority: 5
+        };
+        
+        if (lorryCount < neededLorry) {
+            let energy = this.room.energyCapacityAvailable;
+            var numberOfParts = Math.floor(energy / 150);
+            numberOfParts = Math.min(numberOfParts, Math.floor(30 / 3));
+            
+            options.body = [];
+            for (let i = 0; i < numberOfParts * 2; i++) {
+                options.body.push(CARRY);
+            }
+            for (let i = 0; i < numberOfParts; i++) {
+                options.body.push(MOVE);
+            }
+        
+            this.addToSpawQueue(options, neededLorry - lorryCount);
         }
     },
     
     getMaxBodySize: function() {
         let energy = this.room.energyCapacityAvailable;
-        return Math.floor(energy/200);
+        return Math.min(Math.floor(energy/200) * 3, 30);
     },
     
     getCustomBody: function(energy) {
@@ -170,7 +331,7 @@ var RoomManager = CoreObject.extend({
         var body = [];
         var parts = [WORK, CARRY, MOVE];
         
-        partsCount = Math.min(partsCount, Math.floor(30 / 3));
+        partsCount = Math.min(partsCount, 10);
         
         for (var p = 0; p < parts.length; p++) {
             for (let i = 0; i < partsCount; i++) {
@@ -181,39 +342,46 @@ var RoomManager = CoreObject.extend({
         return body;
     },
     
-    spawnWorker: function(spawn, role, memory, energy) {
-        var name = this.getName(role + '_');
-        var _memory = {role: role, home: this.room.name};
-        
-        if (memory) {
-            _.assign(_memory, memory);
+    spawnCreep: function(spawn, options) {
+        options = options || {};
+                
+        if (!options.memory || !options.memory.role) {
+            return;
         }
         
-        var options = {
-            memory: _memory,
+        var defaults = {
+            name: this.getName(options.memory.role + '_'),
+            body: this.getCustomBody(options.energy),
+            memory: {
+                home: this.room.name,
+            },
             dryRun: true
         };
         
-        if (role == 'harvester' && this.harvesters.length < HARV_SOURCE) {
-            energy = this.room.energyAvailable;
+        options = _.assign(defaults, options);
+        options.memory = _.assign(defaults.memory, options.memory);
+        options.memory.home = this.room.name;
+        
+        if (options.memory.role == 'worker' && this.workers.length < MIN_WORKERS) {
+            options.energy = this.room.energyAvailable;
         }
         
-        if (role == 'worker' && this.workers.length < MIN_WORKERS) {
-            energy = this.room.energyAvailable;
-        }
-        
-        var body = this.getCustomBody(energy);
-        var args = [body, name, options];
+        var args = [options.body, options.name, options];
         
         let test = spawn.spawnCreep.apply(spawn, args);
-       
+        // console.log(test, this.room.energyAvailable, this.room.energyCapacityAvailable, options.memory.role, this.harvesters.length < HARV_SOURCE);
         if(test === 0) {
             delete options.dryRun;
-            if (spawn.spawnCreep.apply(spawn, args) === 0) {
-                console.log('New creep ', name);
+            if (spawn.spawnCreep.apply(spawn, args) === OK) {
+                console.log('New creep ', options.name);
                 return true;
             }
         }
+        
+        // if (test === ERR_NOT_ENOUGH_ENERGY && !this.room.memory.spawnWait) {
+        //     this.room.memory.spawnWait = Game.time;
+        // }
+        
         return false;
     },
     
@@ -251,26 +419,20 @@ var RoomManager = CoreObject.extend({
         this.addWorkerTask(this.getBuildTasks());
     },
     
-    cleanTasks: function() {
-        
-    },
-    
-    updateHarvesterTasks: function() {
-        var _this = this;
-        
+    updatePickupTasks: function(harvesters) {
         if (this.droppedResources.length) {
             this.droppedResources.forEach(function(res) {
-                for (let i in _this.harvesters) {
-                    let harvester = _this.harvesters[i];
+                for (let i in harvesters) {
+                    let harvester = harvesters[i];
                     if (harvester.memory.task && harvester.memory.task.action === 'pickup') {
                         break;
                     }
                     
                     if (_.sum(harvester.carry) < harvester.carryCapacity) {
-                        harvester.memory.task = {
+                        harvester.setTask({
                             action: 'pickup',
                             targetId: res.id
-                        }
+                        });
                     }   
                 }
             });
@@ -278,45 +440,85 @@ var RoomManager = CoreObject.extend({
         
         if (this.tombstones.length) {
             this.tombstones.forEach(function(res) {
-                for (let i in _this.harvesters) {
-                    let harvester = _this.harvesters[i];
+                for (let i in harvesters) {
+                    let harvester = harvesters[i];
                     if (harvester.memory.task && harvester.memory.task.action === 'pickup') {
                         break;
                     }
                     
                     if (_.sum(harvester.carry) < harvester.carryCapacity) {
-                        harvester.memory.task = {
+                        harvester.setTask({
                             action: 'pickup',
                             targetId: res.id
-                        }
+                        });
                     }   
                 }
             });
         }
-        
-        this.workers.forEach(function(harvester) {
-            if (_this.containers.length) {
-                return;
-            }
-
+    },
+    
+    updateSourceTasks: function(harvesters, action) {
+        let _this = this;
+        let availableSources = _.filter(this.sources, (s) => s.energy > 0);
+        action = action || 'harvest';
+        harvesters.forEach(function(harvester) {
             if (!harvester.memory.task) {
                 
                 let sources = [];
-                _this.sources.forEach(function(source) {
-                    let harvestersOnSource = _.filter(_this.harvesters, (h) => h.memory.task && h.memory.task.targetId == source.id).length;
+                availableSources.forEach(function(source) {
+                    let harvestersOnSource = _.filter(harvesters, (h) => h.memory.task && h.memory.task.targetId == source.id).length;
                     sources.push({source: source, harvesters: harvestersOnSource});
                 });
                 
                 sources = sources.sort((s1,s2) => s1.harvesters - s2.harvesters);
                 
+                if (!sources.length) {
+                    _this.room.memory.noEnergyTime = Game.time;
+                    return;
+                }
+                
                 let source = _.first(sources).source;
-                harvester.memory.task = {
-                    action: 'harvest',
+                harvester.setTask({
+                    action: action,
                     targetId: source.id
-                };
+                });
             }
-        });
-
+        });  
+    },
+    
+    updateHarvesterTasks: function() {
+        let _this = this;
+        
+        let harvesters = this.harvesters;
+        if (this.shouldWorkersUseSource) {
+            harvesters = _.filter(this.creeps, (w) => w.memory.role === 'harvester' || w.memory.role === 'worker');
+        }
+        
+        this.updatePickupTasks(harvesters);
+        this.updateSourceTasks(harvesters, 'harvest');
+    },
+    
+    updateLorryTasks: function(lorry) {
+        let _this = this;
+        this.updatePickupTasks(this.lorry);
+        
+        this.lorry.forEach(function(lorry) {
+            if (!lorry.memory.task) {
+                let sources = [];
+                _this.sources.forEach(function(source) {
+                    let lorryOnSource = _.filter(_this.lorry, (l) => l.memory.task && l.memory.task.targetId == source.id).length;
+                    sources.push({source: source, lorry: lorryOnSource});
+                });
+                
+                sources = sources.sort((s1,s2) => s1.lorry - s2.lorry);
+                
+                let source = _.first(sources).source;
+                lorry.setTask({
+                    action: 'lorry',
+                    targetId: source.id
+                });
+            }
+        });  
     },
     
     updateWorkerTasks: function() {
@@ -325,46 +527,50 @@ var RoomManager = CoreObject.extend({
         
         let workerTasks = this.workerTasks.sort((t1, t2) => t1.priority - t2.priority);
         
-        let count = workers.length;
-        
         for (let i = 0; i < workers.length; i++) {
-            if (count < 1) {
-                break;
-            }
             
             let worker = workers[i];
             
-            if (this.containers.length && (!worker.memory.task || worker.memory.task.action === 'upgrade')) {
-                continue;
-            } 
-            
-            if (!this.containers.length) {
-                if (worker.carry.energy == worker.carryCapacity && worker.memory.action == 'harvest') {
-                    worker.removeTask();
+            if (this.shouldWorkersUseSource) {
+                if (worker.memory.task) {
+                    if (worker.carry.energy == worker.carryCapacity && worker.memory.task.action == 'harvest') {
+                        worker.removeTask();
+                    }
+
+                    if (worker.carry.energy < worker.carryCapacity && worker.memory.task.action == 'harvest') {
+                        continue;
+                    }
+                    
+                    if (worker.carry.energy == 0 && worker.memory.task.action != 'harvest') {
+                        worker.removeTask();
+                        continue;
+                    }
                 }
-                
-                if (worker.carry.energy == 0) {
+            } else {
+                if (worker.memory.task && worker.memory.task.action === 'harvest') {
                     worker.removeTask();
-                    continue;
                 }
             }
             
-            
+            if (worker.memory.task && worker.memory.task.action != 'upgrade') {
+                continue;
+            }
                        
             for (let t in workerTasks) {
-                if (count < 1) {
-                    break;
-                }
                 let task = workerTasks[t];
                 let mem = Memory.tasks[task.targetId];
                 
                 let needed = WORKER_PER_TASK[task.action];
-                if (!mem || (mem.creeps.length < needed || task.action === 'upgrade')) {
+                if (task.action === 'build' && this.shouldWorkersUseSource) {
+                    needed = 9999;
+                }
+                
+                if (!mem || mem.creeps.length < needed) {
                     worker.setTask({
                         action: task.action,
                         targetId: task.targetId
                     });
-                    count--;
+                    
                     workers.splice(i,1);
                     i--;
                     break;

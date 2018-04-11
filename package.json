@@ -1,0 +1,32 @@
+{
+  "name": "screeps",
+  "version": "1.0.0",
+  "description": "AI for Screeps",
+  "main": "Gruntfile.js",
+  "dependencies": {
+    "grunt": "^1.0.2",
+    "grunt-contrib-uglify": "^3.3.0",
+    "grunt-contrib-watch": "^1.0.0",
+    "grunt-screeps": "^1.4.0"
+  },
+  "devDependencies": {
+    "grunt-contrib-concat": "^1.0.1",
+    "grunt-contrib-uglify-es": "^3.3.0",
+    "grunt-contrib-watch": "^1.0.0",
+    "lodash": "^4.17.5",
+    "uglify-es": "github:mishoo/UglifyJS2#harmony"
+  },
+  "scripts": {
+    "test": "test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://sntgog@github.com/SNtGog/ScreepsAI.git"
+  },
+  "author": "Gog",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/SNtGog/ScreepsAI/issues"
+  },
+  "homepage": "https://github.com/SNtGog/ScreepsAI#readme"
+}
